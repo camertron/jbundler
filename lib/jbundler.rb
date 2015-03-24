@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Kristian Meier
+# Copyright (C) 2013 Christian Meier
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
 # this software and associated documentation files (the "Software"), to deal in
@@ -18,42 +18,56 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
-require 'maven/tools/jarfile'
-require 'jbundler/classpath_file'
-require 'jbundler/gemfile_lock'
-require 'jbundler/aether'
 
-config = JBundler::Config.new
+require 'jbundler/context'
+require 'jbundler/lock_down'
 
-jarfile = Maven::Tools::Jarfile.new(config.jarfile)
-if config.skip
-  warn "skip jbundler setup"
-else
-  classpath_file = JBundler::ClasspathFile.new(config.classpath_file)
-  gemfile_lock = JBundler::GemfileLock.new(jarfile, config.gemfile_lock)
+module JBundler
 
-  if classpath_file.needs_update?(jarfile, gemfile_lock)
-    aether = JBundler::AetherRuby.new(config)
-
-    jarfile.populate_unlocked(aether)
-    gemfile_lock.populate_dependencies(aether)
-    jarfile.populate_locked(aether)
-
-    aether.resolve
-
-    classpath_file.generate(aether.classpath_array)
-    jarfile.generate_lockfile(aether.resolved_coordinates)
+  def self.context
+    @context ||= JBundler::Context.new
   end
 
-  if classpath_file.exists? && jarfile.exists_lock?
-    require 'java'
-    classpath_file.require_classpath
-    if config.verbose
-      warn "jbundler classpath:"
-      JBUNDLER_CLASSPATH.each do |path|
-        warn "\t#{path}"
+  def self.setup_test
+    context.classpath.require_test_classpath
+    context.config
+  end
+
+  def self.require_jars
+    if context.vendor.vendored?
+      jars = context.vendor.require_jars
+      if context.config.verbose
+        warn "jbundler classpath:"
+        jars.each do |path|
+          warn "\t#{path}"
+        end
       end
+    elsif context.classpath.exists? && context.jarfile.exists_lock?
+      require 'java'
+      context.classpath.require_classpath
+      if context.config.verbose
+        warn "jbundler classpath:"
+        JBUNDLER_CLASSPATH.each do |path|
+            warn "\t#{path}"
+        end
+      end
+      Jars.freeze_loading
     end
   end
+    
+  def self.install( debug = false, verbose = false )
+    jbundler = JBundler::LockDown.new( context.config )
+    msg = jbundler.lock_down( false, debug, verbose )
+    puts msg if msg
+  end
 
+  def self.setup
+    if context.config.skip
+      warn "skip jbundler setup" if context.config.verbose
+    else
+      require_jars
+    end
+  end
 end
+
+JBundler.setup

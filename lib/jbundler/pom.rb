@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Kristian Meier
+# Copyright (C) 2013 Christian Meier
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
 # this software and associated documentation files (the "Software"), to deal in
@@ -22,7 +22,6 @@ require 'fileutils'
 require 'tempfile'
 require 'maven/tools/coordinate'
 require 'securerandom'
-require 'java'
 
 module JBundler
 
@@ -58,7 +57,65 @@ module JBundler
     end
 
     GROUP_ID = 'ruby.bundler'
-    
+
+    def start_write_pom( out, name, version, packaging )
+      outputFactory = XMLOutputFactory.newFactory()
+      xmlStreamWriter = outputFactory.createXMLStreamWriter( out )
+
+      xmlStreamWriter.writeStartDocument
+      xmlStreamWriter.writeStartElement("project")
+      
+      writeElement(xmlStreamWriter,"modelVersion","4.0.0")
+      writeElement(xmlStreamWriter,"groupId", GROUP_ID)
+      writeElement(xmlStreamWriter,"artifactId", name)
+      writeElement(xmlStreamWriter,"version", version.to_s.to_java)
+      writeElement(xmlStreamWriter,"packaging", packaging) if packaging  
+      xmlStreamWriter
+    end
+
+    def to_classifier_version( coords )
+      if coords.size == 4
+        [ nil, coords[3] ]
+      else
+        [ coords[3], coords[4] ]
+      end
+    end
+
+    def write_dep( xmlStreamWriter, coord )
+      coords = coord.split(/:/)
+      group_id = coords[0]
+      artifact_id = coords[1]
+      extension = coords[2]
+      classifier, version = to_classifier_version( coords )
+      
+      xmlStreamWriter.writeStartElement("dependency".to_java)
+      writeElement(xmlStreamWriter,"groupId", group_id)
+      writeElement(xmlStreamWriter,"artifactId", artifact_id)
+      writeElement(xmlStreamWriter,"version", version)
+      
+      writeElement(xmlStreamWriter,"type", extension) if extension != 'jar'
+      writeElement(xmlStreamWriter,"classifier", classifier) if classifier
+      xmlStreamWriter.writeEndElement #dependency
+    end
+
+    def write_dependencies( xmlStreamWriter, deps )
+      xmlStreamWriter.writeStartElement("dependencies".to_java)
+      
+      deps.each do |line|
+        coord = to_coordinate(line)
+        write_dep( xmlStreamWriter, coord ) if coord
+      end
+
+      xmlStreamWriter.writeEndElement #dependencies
+    end
+
+    def end_write_pom( xmlStreamWriter )
+      xmlStreamWriter.writeEndElement #project
+      
+      xmlStreamWriter.writeEndDocument
+      xmlStreamWriter.close
+    end
+
     public
     
     def coordinate
@@ -80,50 +137,15 @@ module JBundler
 
       @file = File.join(temp_dir, 'pom.xml')
 
-      out = java.io.BufferedOutputStream.new(java.io.FileOutputStream.new(@file.to_java))
-      outputFactory = XMLOutputFactory.newFactory()
-      xmlStreamWriter = outputFactory.createXMLStreamWriter(out)
-      xmlStreamWriter.writeStartDocument
-      xmlStreamWriter.writeStartElement("project")
-      
-      writeElement(xmlStreamWriter,"modelVersion","4.0.0")
-      writeElement(xmlStreamWriter,"groupId", GROUP_ID)
-      writeElement(xmlStreamWriter,"artifactId", name)
-      writeElement(xmlStreamWriter,"version", version.to_s.to_java)
-      writeElement(xmlStreamWriter,"packaging", packaging) if packaging
-      
-      xmlStreamWriter.writeStartElement("dependencies".to_java)
-      
-      deps.each do |line|
-        if coord = to_coordinate(line)
-          coords = coord.split(/:/)
-          group_id = coords[0]
-          artifact_id = coords[1]
-          extension = coords[2]
-          classifier = nil
-          if coords.size == 4
-            version = coords[3]
-          else
-            classifier = coords[3]
-            version = coords[4]
-          end
+      out = java.io.BufferedOutputStream.new( java.io.FileOutputStream.new( @file.to_java ) )
 
-          xmlStreamWriter.writeStartElement("dependency".to_java)
-          writeElement(xmlStreamWriter,"groupId", group_id)
-          writeElement(xmlStreamWriter,"artifactId", artifact_id)
-          writeElement(xmlStreamWriter,"version", version)
-          
-          writeElement(xmlStreamWriter,"type", extension) if extension != 'jar'
-          writeElement(xmlStreamWriter,"classifier", classifier) if classifier
-          xmlStreamWriter.writeEndElement #dependency
-        end
-      end
-      xmlStreamWriter.writeEndElement #dependencies
+      xmlStreamWriter = start_write_pom( out, name, version, packaging )
       
-      xmlStreamWriter.writeEndElement #project
+      write_dependencies( xmlStreamWriter, deps )
+
+      end_write_pom( xmlStreamWriter )
       
-      xmlStreamWriter.writeEndDocument
-      xmlStreamWriter.close
+    ensure
       out.close
     end
     

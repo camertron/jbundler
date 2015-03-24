@@ -1,15 +1,24 @@
 language: ruby
-rvm:
-  - jruby-18mode
-  - jruby-19mode
-  - jruby-head
-jdk:
-  - openjdk6
-  - openjdk7
-  - oraclejdk7
-#language: java
-#install: mvn prepare-package -Dmaven.test.skip -quiet
-#script: mvn cucumber:test -Djruby.versions=1.5.6
-#jdk:
-#  - openjdk6
-#  - openjdk7
+bundler_args: --without copyright
+matrix:
+  include:
+    - rvm: jruby
+      jdk: openjdk6
+      script: rm -r src/test/java; mvn test
+    - rvm: jruby
+      jdk: openjdk7
+      script: rm -r src/test/java; mvn test
+    - rvm: jruby
+      jdk: oraclejdk7
+      script: rm -r src/test/java; mvn test
+    - rvm: jruby
+      jdk: oraclejdk8
+      script: rm -r src/test/java; mvn test
+    - rvm: ruby
+      jdk: openjdk7
+      script: mvn verify -DskipTests -Dinvoker.test='*,!executable_*'
+    - rvm: ruby
+      jdk: oraclejdk8
+      script: mvn verify -DskipTests -Dinvoker.test=executable_*
+  allow_failures:
+    - rvm: ruby

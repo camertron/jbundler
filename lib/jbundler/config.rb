@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Kristian Meier
+# Copyright (C) 2013 Christian Meier
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
 # this software and associated documentation files (the "Software"), to deal in
@@ -19,30 +19,74 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 require 'yaml'
+require 'jar_dependencies'
 
 module JBundler
 
   # allow yaml config in $HOME/.jbundlerrc and $PWD/.jbundlerrc
   class Config
 
-    attr_accessor :verbose, :local_repository, :jarfile, :gemfile, :skip, :settings, :offline, :work_dir
+    RC_FILE = '.jbundlerrc'
+
+    attr_accessor :verbose, :local_repository, :jarfile, :gemfile, :skip, :settings, :offline, :work_dir, :vendor_dir, :basedir
 
     def initialize
-      file = '.jbundlerrc'
-      homefile = File.join(ENV['HOME'], file)
-      home_config = YAML.load_file(homefile) if File.exists?(homefile)
+      if ENV.has_key? 'HOME'
+        homefile = File.join(ENV['HOME'], RC_FILE)
+        home_config = YAML.load_file(homefile) if File.exists?(homefile)
+      else
+        home_config = nil
+      end
+      @config = (home_config || {})
+      @basedir = find_basedir( File.expand_path( '.' ) )
+      @basedir ||= File.expand_path( '.' )
+      file = join_basedir( RC_FILE )
       pwd_config = YAML.load_file(file) if File.exists?(file)
-      @config = (home_config || {}).merge(pwd_config || {})
+      @config.merge!(pwd_config || {})
+    end
+    
+    def join_basedir( path )
+      if @basedir
+        File.join( @basedir, path )
+      else
+        path
+      end
     end
 
+    def find_basedir( dir )
+      f = File.join( dir, RC_FILE )
+      return dir if File.exists?( f )
+      f = File.join( dir, _jarfile )
+      return dir if File.exists?( f )
+      f = File.join( dir, _gemfile )
+      return dir if File.exists?( f )
+      parent = File.dirname( dir )
+      if dir != ENV['HOME'] && dir != parent
+        find_basedir( parent )
+      end
+    end
+
+    def absolute( file )
+      if file.nil? || file == File.expand_path( file )
+        file
+      else
+        File.join( @basedir, file )
+      end
+    end
+
+    def _jbundler_env( key )
+      ENV[ key.upcase.gsub( /[.]/, '_' ) ] ||
+        @config[ key.downcase.sub(/^j?bundle_/, '' ).sub( /[.]/, '_' ) ]
+    end
+    private :_jbundler_env
+
     if defined? JRUBY_VERSION
-      def jbundler_env(key)
-        @config[key.downcase.sub(/^j?bundle_/, '').sub(/[.]/, '_')] || java.lang.System.getProperty(key.downcase.gsub(/_/, '.')) || ENV[key.upcase.gsub(/[.]/, '_')]
+      def jbundler_env( key )
+        java.lang.System.getProperty( key.downcase.gsub( /_/, '.' ) ) ||
+          _jbundler_env( key )
       end
     else
-      def jbundler_env(key)
-        @config[key.downcase.sub(/^j?bundler/, '').sub(/[.]/, '_')] || ENV[key.upcase.gsub(/[.]/, '_')]
-      end
+      alias :jbundler_env :_jbundler_env
     end
     private :jbundler_env
 
@@ -59,36 +103,56 @@ module JBundler
     end
 
     def jarfile
-      if File.exists?('Mvnfile')
-        warn "'Mvnfile' name is deprecated, please use 'Jarfile' instead"
-        @jarfile = 'Mvnfile'
-      end
-      @jarfile ||= jbundler_env('JBUNDLE_JARFILE') || 'Jarfile'
+      @jarfile ||= absolute( _jarfile )
     end
+
+    def _jarfile
+      jbundler_env('JBUNDLE_JARFILE') || 'Jarfile'
+    end
+    private :_jarfile
 
     def jarfile_lock
       "#{jarfile}.lock"
     end
 
     def gemfile
-      @gemfile ||= jbundler_env('BUNDLE_GEMFILE') || 'Gemfile'
+      @gemfile ||= absolute( _gemfile )
     end
+
+    def _gemfile
+      jbundler_env('BUNDLE_GEMFILE') || 'Gemfile'
+    end
+    private :_gemfile
 
     def gemfile_lock
       "#{gemfile}.lock"
     end
 
     def classpath_file
-      jbundler_env('JBUNDLE_CLASSPATH_FILE') || '.jbundler/classpath.rb'
+      absolute( jbundler_env('JBUNDLE_CLASSPATH_FILE') ||
+                '.jbundler/classpath.rb' )
     end
 
     def local_repository
       # use maven default local repo as default
-      @local_maven_repository ||= jbundler_env('JBUNDLE_LOCAL_REPOSITORY')
+      local_maven_repository = absolute( jbundler_env('JBUNDLE_LOCAL_REPOSITORY') )
+      if local_maven_repository
+        warn "JBUNDLE_LOCAL_REPOSITORY environment or jbundle.local.repository' system property is deprecated use JARS_HOME or jars.home instead"
+        ENV[ Jars::HOME ] ||= local_maven_repository
+      else
+        # first load the right settings
+        self.settings
+        Jars.home
+      end
     end
 
     def settings
-      @settings ||= jbundler_env('JBUNDLE_SETTINGS')
+      settings = absolute( jbundler_env('JBUNDLE_SETTINGS') )
+      if settings
+        warn "JBUNDLE_SETTINGS environment or jbundle.settings' system property is deprecated use JARS_MAVEN_SETTINGS or jars.maven.settings instead"
+        ENV[ Jars::MAVEN_SETTINGS ] ||= settings
+      end
+      Jars.maven_settings
     end
 
     def offline
@@ -98,24 +162,29 @@ module JBundler
 
     def proxy
       @proxy ||= jbundler_env('JBUNDLE_PROXY')
+      if @proxy
+        warn 'proxy config is deprecated, use settings.xml instead'
+      end
+      @proxy
     end
 
     def mirror
       @mirror ||= jbundler_env('JBUNDLE_MIRROR')
       # nice to have no leading slash
       @mirror = @mirror.sub( /\/$/, '' ) if @mirror
+      if @mirror
+        warn 'mirror config is deprecated, use settings.xml instead'
+      end
       @mirror
     end
 
-    def rubygems_mirror
-      @rubygems_mirror ||= jbundler_env('BUNDLE_RUBYGEMS_MIRROR')
-      # here a leading slash is needed !!
-     @rubygems_mirror =  @rubygems_mirror.sub( /([^\/])$/ , "\\1/" ) if @rubygems_mirror
-      @rubygems_mirror
+    def work_dir
+      @work_dir ||= absolute( jbundler_env('JBUNDLE_WORK_DIR') || 'pkg' )
     end
 
-    def work_dir
-      @work_dir ||= jbundler_env('JBUNDLE_WORK_DIR') || 'target'
+    def vendor_dir
+      @vendor_dir ||= absolute( jbundler_env('JBUNDLE_VENDOR_DIR') ||
+                                File.join( 'vendor', 'jars' ) )
     end
 
   end

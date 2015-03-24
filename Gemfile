@@ -1,5 +1,6 @@
+#-*- mode: ruby -*-
 source 'https://rubygems.org'
+
 gemspec
 
-# needed for some specs
-gem 'rspec', '<3.0', :group => :test
+gem "copyright-header", "1.0.8", :platform => :mri, :group => :copyright

@@ -1,21 +1,33 @@
 #-*- mode: ruby -*-
 
-raise "\n\n\tuse JRuby for this project !!!!\n\n\n" unless defined? JRUBY_VERSION
-
 require 'maven/ruby/tasks'
 
 task :default => [ :test ]
 
-desc 'run all the specs'
-if ENV[ 'rvm_version' ]
-  task :test => [ :minispec ]
-
-  warn 'rvm is not working properly'
-else
-  task :test => [ :minispec, :junit ]
+desc 'run all tests'
+task :all do
+  maven.verify
 end
 
-task :minispec do
+desc 'run some integration test'
+task :integration do
+  maven.verify( '-Dmaven.test.skip' )
+end
+
+desc 'run all the specs, junit tests and integration tests'
+task :all => [ :specs, :junit, :integration ]
+
+desc 'run all the specs und junit tests'
+if ENV[ 'rvm_version' ]
+  task :test => [ :specs ]
+
+  warn 'rvm is not working properly with ruby-maven so NO junit tests'
+else
+  task :test => [ :specs, :junit ]
+end
+
+desc 'run specs'
+task :specs do
   unless File.exists? File.join('lib', 'jbundler.jar' )
     Rake::Task[ :jar ].invoke
   end

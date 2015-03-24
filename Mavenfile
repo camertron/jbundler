@@ -4,38 +4,38 @@ gemfile
 
 jarfile
 
-plugin( 'de.saumya.mojo:minitest-maven-plugin', '${jruby.plugins.version}' ) do
-  # restrict the specs since we have more *_spec,rb files deeper the 
+jruby_plugin :minitest do
+  # restrict the specs since we have more *_spec.rb files deeper in the 
   # directory tree
   execute_goals( :spec, :minispecDirectory => 'spec/*_spec.rb' )
 end
 
-#plugin( :compiler, '3.1', :target => '1.6', :source => '1.6' )
-
-# can be overwritten via cli -Djruby.versions=1.6.7
-# putting 1.5.6 at the end works around the problem of installing gems
-# with "bad" timestamps
-properties( 'jruby.versions' => ['1.6.8','1.7.4','1.5.6'].join(','),
-            # overwrite via cli -Djruby.use18and19=false
-            'jruby.18and19' => true,
+properties( 'jruby.versions' => ['1.6.8','1.7.12', '1.7.16.1'].join(','),
+            'jruby.modes' => ['1.9', '2.0', '2.1'].join(','),
             # just lock the versions
-            'jruby.version' => '1.7.4',
+            'jruby.version' => '1.7.16.1',
+            'jruby.plugins.version' => '1.0.7',
             'tesla.dump.pom' => 'pom.xml',
             'tesla.dump.readonly' => true )
-
-
-# get java testing in place
-scope :test do
-  jar 'org.mockito:mockito-core', '1.9.5'
-  jar 'org.testng:testng', '6.8'
-end
 
 plugin :compiler, '3.1' do
   execute_goals( :testCompile, :phase => 'test-compile' )
 end
 
-plugin :surefire, '2.15' do
-  execute_goals :test, :phase => :test
+# TODO use ruby-maven invoker to avoid prebuild pom.xml
+#require'ruby-maven'
+plugin :invoker, '1.8' do
+  execute_goals( :install, :run,
+                 :id => 'integration-test',
+                 :projectsDirectory => 'integration',
+                 :streamLogs => true,
+                 :cloneProjectsTo => '${project.build.directory}',
+                 :properties => { 'jbundler.version' => '${project.version}' } )
+end
+
+profile!( :gemfile_lock ) do
+  # bundler will be ignored by bundler via Gemfile.lock
+  gem 'bundler', '~> 1.6'
 end
 
 # vim: syntax=Ruby

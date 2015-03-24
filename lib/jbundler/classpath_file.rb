@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Kristian Meier
+# Copyright (C) 2013 Christian Meier
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
 # this software and associated documentation files (the "Software"), to deal in
@@ -25,9 +25,23 @@ module JBundler
     def initialize(classpathfile = '.jbundler/classpath.rb')
       @classpathfile = classpathfile
     end
+    
+    def file
+      @classpathfile
+    end
+
+    def load_classpath
+      load File.expand_path @classpathfile
+    end
 
     def require_classpath
-      load File.expand_path @classpathfile
+      load_classpath
+      JBUNDLER_CLASSPATH.each { |c| require c }
+    end
+
+    def require_test_classpath
+      load_classpath
+      JBUNDLER_TEST_CLASSPATH.each { |c| require c }
     end
 
     def mtime
@@ -38,22 +52,64 @@ module JBundler
       File.exists?(@classpathfile)
     end
 
-    def needs_update?(jarfile, gemfile_lock)
-      (jarfile.exists? || gemfile_lock.exists? || jarfile.exists_lock?) && (!exists? || !jarfile.exists_lock? || (jarfile.exists? && (jarfile.mtime > mtime)) || (jarfile.exists_lock? && (jarfile.mtime_lock > mtime)) || (gemfile_lock.exists? && (gemfile_lock.mtime > mtime)))
+    def missing?( jarfile )
+      !exists? || !jarfile.exists_lock?
     end
 
-    def generate(classpath_array)
+    def jarfile_newer?( jarfile )
+      jarfile.exists? && (jarfile.mtime > mtime)
+    end
+
+    def jarlock_newer?( jarfile )
+      jarfile.exists_lock? && (jarfile.mtime_lock > mtime)
+    end
+       
+    def needs_update?(jarfile, gemfile_lock)
+      if ( jarfile.exists? || gemfile_lock.exists? || jarfile.exists_lock? )
+        missing?( jarfile ) || jarfile_newer?( jarfile ) || jarlock_newer?( jarfile ) || gemfile_lock.newer?( mtime )
+      else
+        false
+      end
+    end
+
+    def generate( classpath_array, test_array = [], jruby_array = [], local_repo = nil )
       FileUtils.mkdir_p(File.dirname(@classpathfile))
       File.open(@classpathfile, 'w') do |f|
-        f.puts "JBUNDLER_CLASSPATH = []"
-        classpath_array.each do |path|
-          f.puts "JBUNDLER_CLASSPATH << '#{path}'" unless path =~ /pom$/
+        if local_repo
+          local_repo = File.expand_path( local_repo )
+          f.puts "require 'jar_dependencies'"
+          f.puts "JBUNDLER_LOCAL_REPO = Jars.home"
         end
-        f.puts "JBUNDLER_CLASSPATH.freeze"
-        f.puts "JBUNDLER_CLASSPATH.each { |c| require c }"
+        dump_array( f, jruby_array || [], 'JRUBY_', local_repo )
+        dump_array( f, test_array || [], 'TEST_', local_repo )
+        dump_array( f, classpath_array || [], '', local_repo )
         f.close
       end
     end
     
+    private
+    def dump_array( file, array, prefix, local_repo )
+      file.puts "JBUNDLER_#{prefix}CLASSPATH = []"
+      array.each do |path|
+        dump_jar( file, path, prefix, local_repo )
+      end
+      file.puts "JBUNDLER_#{prefix}CLASSPATH.freeze"
+    end
+
+    def dump_jar( file, path, prefix, local_repo )
+      return if path =~ /pom$/
+      if local_repo
+        path.sub!( /#{local_repo}/, '' )
+        unless File.exists?( path )
+          file.puts "JBUNDLER_#{prefix}CLASSPATH << (JBUNDLER_LOCAL_REPO + '#{path}')"
+          path = nil
+        end
+      end
+      if path
+        # either we do not have a local_repo or the path is a absolute
+        # path from system artifact
+        file.puts "JBUNDLER_#{prefix}CLASSPATH << '#{path}'"        
+      end
+    end
   end
 end

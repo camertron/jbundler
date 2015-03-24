@@ -1,54 +1,31 @@
-require 'maven/tools/jarfile'
-require 'maven/tools/dsl'
-require 'maven/tools/model'
+require 'jbundler/configurator'
 require 'maven/ruby/maven'
 require 'fileutils'
 module JBundler
   class Tree
 
-    include Maven::Tools::DSL
-
     def initialize( config )
-      @config = config
+      @config = Configurator.new( config )
     end
 
     def show_it( debug = false )
-      require 'jbundler'
-      jfile = ::Maven::Tools::Jarfile.new( @config.jarfile )
-      project = maven do
-        basedir( File.dirname( @config.jarfile ) )
+      m = Maven::Ruby::Maven.new
+      m.options[ '-f' ] = File.join( File.dirname( __FILE__ ), 
+                                     'dependency_pom.rb' )
+      m.options[ '-q' ] = nil unless debug
+      m.verbose = debug
 
-        gemfile( @config.gemfile ) if File.exists? @config.gemfile
+      @config.configure( m )
 
-        jarfile :skip_locked => true
+      puts '...'
 
-        build.directory = @config.work_dir if @config.work_dir != 'target'
-        
-        properties( 'project.build.sourceEncoding' => 'utf-8' )
-      end
+      tree = File.join( File.expand_path( @config.work_dir ), 
+                                 'tree.txt' )
+      m.property( 'jbundler.outputFile', tree )
 
-      output = java.io.ByteArrayOutputStream.new
-      out = java.io.PrintStream.new( output )
-      old = java.lang.System.err
-      java.lang.System.err = out
+      m.exec( 'dependency:tree' )
 
-      m = Maven::Ruby::Maven.new( project, '.tree.pom.xml' )
-      m.exec( 'org.apache.maven.plugins:maven-dependency-plugin:2.8:tree' )
-      result = output.to_string( 'utf-8' ).split( "\n" )
-      result = result.each do |line|
-        line.gsub!( /\[[^ ]+\] /, '' )
-      end
-      unless debug
-        result = result.select do |line|
-          line =~ /^[INFO].*/
-        end
-      end
-      result = result.each do |line|
-        line.gsub!( /^.* - /, '' )
-      end
-      $stdout.puts result.join( "\n" )#.gsub( /^.* - /, '' )#.gsub( /\n\n\n/, "\n" )
-    ensure
-      java.lang.System.err = old
+      puts File.read( tree )
     end
   end
 end
